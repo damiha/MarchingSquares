@@ -28,7 +28,7 @@ sf::Vector2f getRelPosSide(int side){
     }
 }
 
-void drawDisplayMode(sf::RenderWindow& window, DisplayMode mode) {
+void drawDisplayMode(sf::RenderWindow& window, DisplayMode mode, float threshold) {
     static sf::Font font;
     static bool fontLoaded = false;
 
@@ -41,26 +41,41 @@ void drawDisplayMode(sf::RenderWindow& window, DisplayMode mode) {
         fontLoaded = true;
     }
 
-    sf::Text text;
-    text.setFont(font);
-    text.setCharacterSize(20);
-    text.setFillColor(sf::Color::Black);
-    text.setPosition(10, 10);
+    // Mode text
+    sf::Text modeText;
+    modeText.setFont(font);
+    modeText.setCharacterSize(20);
+    modeText.setFillColor(sf::Color::Black);
+    modeText.setPosition(10, 10);
 
     // Set the string based on the mode
     switch (mode) {
         case DisplayMode::CONTOUR:
-            text.setString("Mode: CONTOUR");
+            modeText.setString("Mode: CONTOUR");
             break;
         case DisplayMode::GRID:
-            text.setString("Mode: GRID");
+            modeText.setString("Mode: GRID");
             break;
         case DisplayMode::INTERPOLATING_CONTOUR:
-            text.setString("Mode: INTERPOLATING CONTOUR");
+            modeText.setString("Mode: INTERPOLATING CONTOUR");
             break;
     }
 
-    window.draw(text);
+    // Threshold text
+    sf::Text thresholdText;
+    thresholdText.setFont(font);
+    thresholdText.setCharacterSize(20);
+    thresholdText.setFillColor(sf::Color::Black);
+    thresholdText.setPosition(10, 40);  // Position it below the mode text
+
+    // Set the threshold string with 2 decimal places
+    char thresholdStr[50];
+    snprintf(thresholdStr, sizeof(thresholdStr), "Threshold: %.2f", threshold);
+    thresholdText.setString(thresholdStr);
+
+    // Draw both texts
+    window.draw(modeText);
+    window.draw(thresholdText);
 }
 
 sf::Vector2f getRelPosSide(int side, float* grid, int x, int y, int nX, float threshold){
@@ -200,6 +215,8 @@ int main()
     float timeUntilCompletelyFilled = 0.1;
     float timeUntilCompletelyRemoved = 0.01;
 
+    float speedFactorThreshold = 1;
+
     while (window.isOpen())
     {
         sf::Event event;
@@ -219,7 +236,6 @@ int main()
                 else if (event.mouseButton.button == sf::Mouse::Right) {
                     brushMode = REMOVING;
                     mousePressed = true;
-                    printf("REMOVING\n");
                 }
             }
 
@@ -239,6 +255,19 @@ int main()
                 }
                 if (event.key.code == sf::Keyboard::I) {
                     displayMode = INTERPOLATING_CONTOUR;
+                }
+                if (event.key.code == sf::Keyboard::Up) {
+
+                    threshold += (threshold + speedFactorThreshold * deltaTime <= 1.0 ? speedFactorThreshold * deltaTime : 0);
+
+                    // needs to recompute contour at different level
+                    gridHasChanged = true;
+                }
+                if (event.key.code == sf::Keyboard::Down) {
+                    threshold -= (threshold - speedFactorThreshold * deltaTime >= 0 ? speedFactorThreshold * deltaTime : 0);
+
+                    // needs to recompute contour at different level
+                    gridHasChanged = true;
                 }
             }
 
@@ -482,7 +511,7 @@ int main()
 
         window.draw(cursor);
 
-        drawDisplayMode(window, displayMode);
+        drawDisplayMode(window, displayMode, threshold);
         
         window.display();
     }
