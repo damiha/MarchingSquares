@@ -28,6 +28,41 @@ sf::Vector2f getRelPosSide(int side){
     }
 }
 
+void drawDisplayMode(sf::RenderWindow& window, DisplayMode mode) {
+    static sf::Font font;
+    static bool fontLoaded = false;
+
+    // Load the font (only once)
+    if (!fontLoaded) {
+        if (!font.loadFromFile("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")) {
+            printf("Error loading font\n");
+            return;
+        }
+        fontLoaded = true;
+    }
+
+    sf::Text text;
+    text.setFont(font);
+    text.setCharacterSize(20);
+    text.setFillColor(sf::Color::Black);
+    text.setPosition(10, 10);
+
+    // Set the string based on the mode
+    switch (mode) {
+        case DisplayMode::CONTOUR:
+            text.setString("Mode: CONTOUR");
+            break;
+        case DisplayMode::GRID:
+            text.setString("Mode: GRID");
+            break;
+        case DisplayMode::INTERPOLATING_CONTOUR:
+            text.setString("Mode: INTERPOLATING CONTOUR");
+            break;
+    }
+
+    window.draw(text);
+}
+
 sf::Vector2f getRelPosSide(int side, float* grid, int x, int y, int nX, float threshold){
 
     float fx0 = -1;
@@ -103,6 +138,8 @@ int main()
 {
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Marching Squares");
 
+    window.setMouseCursorVisible(false);
+
     bool mousePressed = false;
     
     sf::Vector2i mousePos;
@@ -117,7 +154,7 @@ int main()
         }
     }
 
-    DisplayMode displayMode = CONTOUR;
+    DisplayMode displayMode = GRID;
     BrushMode brushMode = ADDING;
 
     bool gridHasChanged = true;
@@ -125,20 +162,23 @@ int main()
     std::vector<int> cellHasSides;
     std::vector<int> sides;
 
-    // for drawing
-    float kernelRadius = 30.;
-
-    int kernelRadiusInTileLengths= (int)((kernelRadius / TILE_LENGTH) + 1);
-
     // for marching squares
     float threshold = 0.5;
 
-    float kernel[2 * kernelRadiusInTileLengths + 1][2 * kernelRadiusInTileLengths + 1];
+    // for drawing
+    float kernelRadius = 30.;
+
+    float minKernelRadius = 10;
+    float maxKernelRadius = 50;
+
+    int maxKernelRadiusInTileLengths= (int)((maxKernelRadius / TILE_LENGTH) + 1);
+
+    float kernel[2 * maxKernelRadiusInTileLengths + 1][2 * maxKernelRadiusInTileLengths + 1];
 
     sf::Vector2f midPoint(kernelRadius, kernelRadius);
 
-    for(int i = 0; i < 2 * kernelRadiusInTileLengths + 1; i++){
-        for(int j = 0; j < 2 * kernelRadiusInTileLengths + 1; j++){
+    for(int i = 0; i < 2 * maxKernelRadiusInTileLengths + 1; i++){
+        for(int j = 0; j < 2 * maxKernelRadiusInTileLengths + 1; j++){
             
             sf::Vector2f position((j + 0.5) * TILE_LENGTH, (i + 0.5) * TILE_LENGTH);
             sf::Vector2f distVec = position - midPoint;
@@ -201,6 +241,39 @@ int main()
                     displayMode = INTERPOLATING_CONTOUR;
                 }
             }
+
+            if (event.type == sf::Event::MouseWheelScrolled)
+            {
+                if (event.mouseWheelScroll.wheel == sf::Mouse::VerticalWheel)
+                {                    
+                    if (event.mouseWheelScroll.delta > 0){
+                        kernelRadius *= 1.1;
+                    }
+
+                    else if (event.mouseWheelScroll.delta < 0){
+                        kernelRadius *= 0.9;
+                    }
+
+                    kernelRadius = clamp(kernelRadius, minKernelRadius, maxKernelRadius);
+
+                    // TODO: encapsulate into function
+                    // recompute kernel
+                    sf::Vector2f midPoint(kernelRadius, kernelRadius);
+
+                    for(int i = 0; i < 2 * maxKernelRadiusInTileLengths + 1; i++){
+                        for(int j = 0; j < 2 * maxKernelRadiusInTileLengths + 1; j++){
+                            
+                            sf::Vector2f position((j + 0.5) * TILE_LENGTH, (i + 0.5) * TILE_LENGTH);
+                            sf::Vector2f distVec = position - midPoint;
+
+                            float lengthToMidPoint = length(distVec);
+
+                            //printf("length to midpoint: %.3f\n", lengthToMidPoint);
+                            kernel[i][j] = clamp(1.0 - (lengthToMidPoint / kernelRadius), 0.0f, 1.0f);
+                        }
+                    }
+                }
+            }
         }
 
         int currentMicroSeconds = clock.getElapsedTime().asMicroseconds();
@@ -213,20 +286,27 @@ int main()
         // update the grid if possible
         if(mousePressed){
 
-            int mouseGridX = mousePos.x / TILE_LENGTH;
-            int mouseGridY = mousePos.y / TILE_LENGTH;
+            int mouseGridX = (int)roundf(mousePos.x / TILE_LENGTH);
+            int mouseGridY = (int)roundf(mousePos.y / TILE_LENGTH);
 
             // simple kernel function
             float target = brushMode == ADDING ? 1.0f : 0.0f;
             float strength = brushMode == ADDING ? (deltaTime / timeUntilCompletelyFilled) : (deltaTime / timeUntilCompletelyRemoved);
             
-            for(int i = -kernelRadiusInTileLengths; i <= kernelRadiusInTileLengths; i++){
-                for(int j = -kernelRadiusInTileLengths; j <= kernelRadiusInTileLengths; j++){
+            for(int i = -maxKernelRadiusInTileLengths; i <= maxKernelRadiusInTileLengths; i++){
+                for(int j = -maxKernelRadiusInTileLengths; j <= maxKernelRadiusInTileLengths; j++){
+
+                    int destX = mouseGridX + j;
+                    int destY = mouseGridY + i;
+
+                    if(destX >= nX - 1 || destY >= nY - 1){
+                        continue;
+                    }
                     
-                    float lambda = strength * kernel[i + kernelRadiusInTileLengths][j + kernelRadiusInTileLengths];
+                    float lambda = strength * kernel[i + maxKernelRadiusInTileLengths][j + maxKernelRadiusInTileLengths];
                     lambda = clamp(lambda, 0, 1);
 
-                    grid[mouseGridY + i][mouseGridX + j] = (1 - lambda) * grid[mouseGridY + i][mouseGridX + j] + lambda * target;
+                    grid[destY][destX] = (1 - lambda) * grid[destY][destX] + lambda * target;
 
                     gridHasChanged = true;
                 }
@@ -391,6 +471,18 @@ int main()
                 }
             }
         }
+
+        // draw cursor
+        sf::CircleShape cursor(kernelRadius);
+        cursor.setOrigin(2 * kernelRadius, 2 * kernelRadius);
+        cursor.setPosition(sf::Vector2f(mousePos));
+        cursor.setFillColor(sf::Color::Transparent);
+        cursor.setOutlineColor(sf::Color::Black);
+        cursor.setOutlineThickness(2);
+
+        window.draw(cursor);
+
+        drawDisplayMode(window, displayMode);
         
         window.display();
     }
