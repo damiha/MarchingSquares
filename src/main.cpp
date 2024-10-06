@@ -8,6 +8,11 @@ enum DisplayMode : unsigned int {
     INTERPOLATING_CONTOUR = 2
 };
 
+enum BrushMode : unsigned int {
+    ADDING = 0,
+    REMOVING = 1,
+};
+
 sf::Vector2f getRelPosSide(int side){
     switch(side){
         case 0:
@@ -99,6 +104,7 @@ int main()
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Marching Squares");
 
     bool mousePressed = false;
+    
     sf::Vector2i mousePos;
 
     int nY = WINDOW_HEIGHT / TILE_LENGTH;
@@ -112,6 +118,7 @@ int main()
     }
 
     DisplayMode displayMode = CONTOUR;
+    BrushMode brushMode = ADDING;
 
     bool gridHasChanged = true;
     std::vector<int> cellBeginsAtIndex;
@@ -119,7 +126,7 @@ int main()
     std::vector<int> sides;
 
     // for drawing
-    float kernelRadius = 20.;
+    float kernelRadius = 30.;
 
     int kernelRadiusInTileLengths= (int)((kernelRadius / TILE_LENGTH) + 1);
 
@@ -143,6 +150,16 @@ int main()
         }
     }
 
+    sf::Clock clock;
+
+    int lastMicroSeconds = clock.getElapsedTime().asMicroseconds();
+
+    float deltaTime = 0;
+
+    // half a second till completely filled
+    float timeUntilCompletelyFilled = 0.1;
+    float timeUntilCompletelyRemoved = 0.01;
+
     while (window.isOpen())
     {
         sf::Event event;
@@ -154,13 +171,21 @@ int main()
             mousePos = sf::Mouse::getPosition(window);
 
             if (event.type == sf::Event::MouseButtonPressed) {
+
                 if (event.mouseButton.button == sf::Mouse::Left) {
+                    brushMode = ADDING;
                     mousePressed = true;
+                }
+                else if (event.mouseButton.button == sf::Mouse::Right) {
+                    brushMode = REMOVING;
+                    mousePressed = true;
+                    printf("REMOVING\n");
                 }
             }
 
             if (event.type == sf::Event::MouseButtonReleased) {
-                if (event.mouseButton.button == sf::Mouse::Left) {
+
+                if (event.mouseButton.button == sf::Mouse::Left || event.mouseButton.button == sf::Mouse::Right) {
                     mousePressed = false;
                 }
             }
@@ -169,20 +194,21 @@ int main()
                 if (event.key.code == sf::Keyboard::C) {
                     displayMode = CONTOUR;
                 }
-            }
-
-            if (event.type == sf::Event::KeyPressed) {
                 if (event.key.code == sf::Keyboard::G) {
                     displayMode = GRID;
                 }
-            }
-
-            if (event.type == sf::Event::KeyPressed) {
                 if (event.key.code == sf::Keyboard::I) {
                     displayMode = INTERPOLATING_CONTOUR;
                 }
             }
         }
+
+        int currentMicroSeconds = clock.getElapsedTime().asMicroseconds();
+
+        int microSecondsSinceLastFrame = currentMicroSeconds - lastMicroSeconds;
+        lastMicroSeconds = currentMicroSeconds;
+
+        deltaTime = microSecondsSinceLastFrame * 1e-6;
 
         // update the grid if possible
         if(mousePressed){
@@ -190,16 +216,15 @@ int main()
             int mouseGridX = mousePos.x / TILE_LENGTH;
             int mouseGridY = mousePos.y / TILE_LENGTH;
 
+            // simple kernel function
+            float target = brushMode == ADDING ? 1.0f : 0.0f;
+            float strength = brushMode == ADDING ? (deltaTime / timeUntilCompletelyFilled) : (deltaTime / timeUntilCompletelyRemoved);
             
             for(int i = -kernelRadiusInTileLengths; i <= kernelRadiusInTileLengths; i++){
                 for(int j = -kernelRadiusInTileLengths; j <= kernelRadiusInTileLengths; j++){
                     
-                    // simple kernel function
-                    float target = 1.0;
-
-                    float slowDownFactor = 1e-3;
-
-                    float lambda = slowDownFactor * kernel[i + kernelRadiusInTileLengths][j + kernelRadiusInTileLengths];
+                    float lambda = strength * kernel[i + kernelRadiusInTileLengths][j + kernelRadiusInTileLengths];
+                    lambda = clamp(lambda, 0, 1);
 
                     grid[mouseGridY + i][mouseGridX + j] = (1 - lambda) * grid[mouseGridY + i][mouseGridX + j] + lambda * target;
 

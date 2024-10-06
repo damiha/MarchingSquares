@@ -5,6 +5,6 @@
 int WINDOW_WIDTH = 800;
 int WINDOW_HEIGHT = 800;
 
-int TILE_LENGTH = 20;
+int TILE_LENGTH = 10;
 
 #endif
