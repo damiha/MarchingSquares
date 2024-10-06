@@ -1,9 +1,11 @@
 #include <SFML/Graphics.hpp>
 #include "../include/Globals.h"
+#include <cmath>
 
 enum DisplayMode : unsigned int {
     GRID = 0,
-    CONTOUR = 1
+    CONTOUR = 1,
+    INTERPOLATING_CONTOUR = 2
 };
 
 sf::Vector2f getRelPosSide(int side){
@@ -19,6 +21,77 @@ sf::Vector2f getRelPosSide(int side){
         default:
             exit(-1);
     }
+}
+
+sf::Vector2f getRelPosSide(int side, float* grid, int x, int y, int nX, float threshold){
+
+    float fx0 = -1;
+    float fx1 = -1;
+
+    sf::Vector2f x0;
+    sf::Vector2f x1;
+
+    float t = -1.;
+    
+    switch(side){
+        case 0:
+
+            x0 = sf::Vector2f(0, 0);
+            x1 = sf::Vector2f(TILE_LENGTH, 0);
+
+            fx0 = grid[y * nX  + x];
+            fx1 = grid[y * nX + (x + 1)];
+            
+            break;
+
+        case 1:
+            
+            x0 = sf::Vector2f(TILE_LENGTH, 0);
+            x1 = sf::Vector2f(TILE_LENGTH, TILE_LENGTH);
+
+            fx0 = grid[y * nX + (x + 1)];
+            fx1 = grid[(y + 1) * nX  + (x + 1)];
+            
+            break;
+
+        case 2:
+            
+            x0 = sf::Vector2f(TILE_LENGTH, TILE_LENGTH);
+            x1 = sf::Vector2f(0, TILE_LENGTH);
+
+            fx0 = grid[(y + 1) * nX + (x + 1)];
+            fx1 = grid[(y + 1) * nX + x];
+            
+            break;
+
+        case 3:
+            
+            x0 = sf::Vector2f(0, TILE_LENGTH);
+            x1 = sf::Vector2f(0, 0);
+
+            fx0 = grid[(y + 1) * nX + x];
+            fx1 = grid[y * nX + x];
+            
+            break;
+        
+        default:
+            exit(-1);
+    }
+
+    t = (threshold - fx0) / (fx1 - fx0);
+
+    // clamping
+    t = t > 1 ? 1 : (t < 0 ? 0 : t);
+
+    return (1.f - t) * x0 + t * x1;
+}
+
+float length(sf::Vector2f& v){
+    return std::sqrt(v.x * v.x + v.y * v.y);
+}
+
+float clamp(float x, float min, float max){
+    return x > max ? max : (x < min ? min : x);
 }
 
 int main()
@@ -46,7 +119,29 @@ int main()
     std::vector<int> sides;
 
     // for drawing
-    float kernelRadius = 5.;
+    float kernelRadius = 20.;
+
+    int kernelRadiusInTileLengths= (int)((kernelRadius / TILE_LENGTH) + 1);
+
+    // for marching squares
+    float threshold = 0.5;
+
+    float kernel[2 * kernelRadiusInTileLengths + 1][2 * kernelRadiusInTileLengths + 1];
+
+    sf::Vector2f midPoint(kernelRadius, kernelRadius);
+
+    for(int i = 0; i < 2 * kernelRadiusInTileLengths + 1; i++){
+        for(int j = 0; j < 2 * kernelRadiusInTileLengths + 1; j++){
+            
+            sf::Vector2f position((j + 0.5) * TILE_LENGTH, (i + 0.5) * TILE_LENGTH);
+            sf::Vector2f distVec = position - midPoint;
+
+            float lengthToMidPoint = length(distVec);
+
+            //printf("length to midpoint: %.3f\n", lengthToMidPoint);
+            kernel[i][j] = clamp(1.0 - (lengthToMidPoint / kernelRadius), 0.0f, 1.0f);
+        }
+    }
 
     while (window.isOpen())
     {
@@ -81,6 +176,12 @@ int main()
                     displayMode = GRID;
                 }
             }
+
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::I) {
+                    displayMode = INTERPOLATING_CONTOUR;
+                }
+            }
         }
 
         // update the grid if possible
@@ -89,11 +190,19 @@ int main()
             int mouseGridX = mousePos.x / TILE_LENGTH;
             int mouseGridY = mousePos.y / TILE_LENGTH;
 
-            int kernelRadiusInTileLengths= (int)((kernelRadius / TILE_LENGTH) + 1);
-
+            
             for(int i = -kernelRadiusInTileLengths; i <= kernelRadiusInTileLengths; i++){
                 for(int j = -kernelRadiusInTileLengths; j <= kernelRadiusInTileLengths; j++){
-                    grid[mouseGridY + i][mouseGridX + j] = 1.;
+                    
+                    // simple kernel function
+                    float target = 1.0;
+
+                    float slowDownFactor = 1e-3;
+
+                    float lambda = slowDownFactor * kernel[i + kernelRadiusInTileLengths][j + kernelRadiusInTileLengths];
+
+                    grid[mouseGridY + i][mouseGridX + j] = (1 - lambda) * grid[mouseGridY + i][mouseGridX + j] + lambda * target;
+
                     gridHasChanged = true;
                 }
             }
@@ -103,7 +212,7 @@ int main()
 
         if(displayMode == GRID){
             
-            float radius = 2;
+            float radius = 4;
 
             sf::CircleShape dot(radius);
             dot.setOrigin(sf::Vector2f(radius, radius));
@@ -120,7 +229,7 @@ int main()
                 }
             }
         }
-        else if(displayMode == CONTOUR){
+        else if(displayMode == CONTOUR || displayMode == INTERPOLATING_CONTOUR){
 
             if(gridHasChanged){
                 
@@ -128,8 +237,6 @@ int main()
                 cellBeginsAtIndex.clear();
                 cellHasSides.clear();
                 sides.clear();
-
-                float threshold = 0.5;
 
                 int sideCount = 0;
                 
@@ -228,8 +335,8 @@ int main()
             line[1].color = sf::Color::Black;
             
             // code just displays the contour
-            for(int y = 0; y < nY; y++){
-                for(int x = 0; x < nX; x++){
+            for(int y = 0; y < nY - 1; y++){
+                for(int x = 0; x < nX - 1; x++){
 
                     int idx = y * nX + x;
 
@@ -244,8 +351,15 @@ int main()
                         int startSide = sides[beginIdx + i];
                         int endSide = sides[beginIdx + i + 1];
 
-                        line[0].position = tilePos + getRelPosSide(startSide);
-                        line[1].position = tilePos + getRelPosSide(endSide);
+                        if(displayMode == CONTOUR){
+                            line[0].position = tilePos + getRelPosSide(startSide);
+                            line[1].position = tilePos + getRelPosSide(endSide);
+                        }
+                        else{
+                            // must be interpolating contour
+                            line[0].position = tilePos + getRelPosSide(startSide, (float*)grid, x, y, nX, threshold);
+                            line[1].position = tilePos + getRelPosSide(endSide, (float*)grid, x, y, nX, threshold);
+                        }
                         
                         window.draw(line);
                     }
